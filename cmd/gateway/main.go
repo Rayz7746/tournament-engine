@@ -1,0 +1,79 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"google.golang.org/grpc"
+)
+
+const defaultAddress = ":50051"
+
+func main() {
+	if err := run(); err != nil {
+		log.Printf("gateway stopped with error: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	address := os.Getenv("GRPC_ADDR")
+	if address == "" {
+		address = defaultAddress
+	}
+
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", address, err)
+	}
+	defer listener.Close()
+
+	server := grpc.NewServer()
+	// TODO: Register gateway gRPC services here.
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	log.Printf("gateway listening on %s", address)
+
+	select {
+	case err := <-serveErr:
+		return fmt.Errorf("serve gRPC: %w", err)
+	case <-ctx.Done():
+		log.Print("gateway received shutdown signal")
+	}
+
+	gracefulStop(server, 10*time.Second)
+	log.Print("gateway stopped")
+	return nil
+}
+
+func gracefulStop(server *grpc.Server, timeout time.Duration) {
+	stopped := make(chan struct{})
+	go func() {
+		server.GracefulStop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(timeout):
+		log.Printf("graceful shutdown exceeded %s; forcing stop", timeout)
+		server.Stop()
+	}
+}
