@@ -7,7 +7,7 @@
   - Establish Go standard project directory layout
   - Verify container persistence & network connectivity
 
-- [ ] **Stage 2: Core Module A - Atomic Distributed Lock**
+- [x] **Stage 2: Core Module A - Atomic Distributed Lock**
   - Implement Redis + Lua atomic check-in locking logic
   - Wrap Go client for Redis `EVAL` command
   - Write unit tests for lock concurrency
@@ -63,3 +63,16 @@
 - `go build ./...` — passed.
 - `go vet ./...` — passed.
 - All three microservice entrypoints compile cleanly.
+
+### Stage 2: Core Module A - Atomic Distributed Lock — Completed
+
+#### Completed Tasks
+
+- Added `internal/checkin/checkin.lua` to atomically check for an existing player check-in, create the check-in key, and apply its TTL.
+- Added `internal/checkin.CheckinManager`, which embeds and executes the Lua script through go-redis script caching (`EVALSHA` with automatic `EVAL` fallback).
+- Added Redis-backed tests for a successful first check-in, duplicate rejection, TTL application, and 64 simultaneous check-in attempts with exactly one successful caller.
+- Kept test cleanup scoped to unique per-test Redis keys so the suite does not flush or disturb unrelated Redis data.
+
+#### Verification
+
+- `go test -v -race ./internal/checkin/...` — passed with no reported data races.
