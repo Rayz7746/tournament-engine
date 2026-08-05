@@ -24,11 +24,12 @@ func (s *Service) GeneratePairings(
 	ctx context.Context,
 	request *pairingv1.PairingRequest,
 ) (*pairingv1.PairingResponse, error) {
-	matches, err := s.pool.GeneratePairings(ctx, request)
+	result, err := s.pool.GeneratePairings(ctx, request)
 	if err == nil {
 		return &pairingv1.PairingResponse{
-			Success: true,
-			Matches: matches,
+			Success:     true,
+			Matches:     result.Matches,
+			ByePlayerId: result.ByePlayerID,
 		}, nil
 	}
 

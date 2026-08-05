@@ -27,11 +27,12 @@ func TestCalculatePairingsSortsAndPairsEightPlayers(t *testing.T) {
 		},
 	}
 
-	matches, err := CalculatePairings(context.Background(), request)
+	result, err := CalculatePairings(context.Background(), request)
 	if err != nil {
 		t.Fatalf("CalculatePairings() error = %v", err)
 	}
 
+	matches := result.Matches
 	want := [][2]string{
 		{"p1", "p2"},
 		{"p3", "p4"},
@@ -64,11 +65,12 @@ func TestCalculatePairingsAvoidsPreviousOpponents(t *testing.T) {
 		},
 	}
 
-	matches, err := CalculatePairings(context.Background(), request)
+	result, err := CalculatePairings(context.Background(), request)
 	if err != nil {
 		t.Fatalf("CalculatePairings() error = %v", err)
 	}
 
+	matches := result.Matches
 	want := [][2]string{{"p1", "p3"}, {"p2", "p4"}}
 	for i, match := range matches {
 		if got := [2]string{match.GetWhitePlayerId(), match.GetBlackPlayerId()}; got != want[i] {
@@ -77,10 +79,174 @@ func TestCalculatePairingsAvoidsPreviousOpponents(t *testing.T) {
 	}
 }
 
+func TestCalculatePairingsAssignsByeToLowestEligiblePlayer(t *testing.T) {
+	request := &pairingv1.PairingRequest{
+		TournamentId: "tournament-bye",
+		Round:        4,
+		Players: []*pairingv1.Player{
+			{PlayerId: "p1", Score: 5},
+			{PlayerId: "p2", Score: 2},
+			{PlayerId: "p3", Score: 1, ReceivedBye: true},
+		},
+	}
+
+	result, err := CalculatePairings(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CalculatePairings() error = %v", err)
+	}
+
+	if result.ByePlayerID != "p2" {
+		t.Errorf("bye player = %q, want %q", result.ByePlayerID, "p2")
+	}
+	if len(result.Matches) != 1 {
+		t.Fatalf("match count = %d, want 1", len(result.Matches))
+	}
+	match := result.Matches[0]
+	if got := [2]string{match.GetWhitePlayerId(), match.GetBlackPlayerId()}; got != [2]string{"p1", "p3"} {
+		t.Errorf("match players = %v, want [p1 p3]", got)
+	}
+}
+
+func TestCalculatePairingsGivesWhiteToPlayerWithMoreBlackGames(t *testing.T) {
+	request := &pairingv1.PairingRequest{
+		TournamentId: "tournament-color-balance",
+		Round:        5,
+		Players: []*pairingv1.Player{
+			{
+				PlayerId:   "higher-ranked",
+				Score:      8,
+				WhiteCount: 2,
+				BlackCount: 2,
+				LastColor:  "WHITE",
+			},
+			{
+				PlayerId:   "more-black-games",
+				Score:      7,
+				WhiteCount: 1,
+				BlackCount: 4,
+				LastColor:  "BLACK",
+			},
+		},
+	}
+
+	result, err := CalculatePairings(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CalculatePairings() error = %v", err)
+	}
+
+	match := result.Matches[0]
+	if match.GetWhitePlayerId() != "more-black-games" {
+		t.Errorf("white player = %q, want %q", match.GetWhitePlayerId(), "more-black-games")
+	}
+}
+
+func TestCalculatePairingsAlternatesLastColor(t *testing.T) {
+	request := &pairingv1.PairingRequest{
+		TournamentId: "tournament-color-alternation",
+		Round:        3,
+		Players: []*pairingv1.Player{
+			{
+				PlayerId:   "higher-ranked",
+				Score:      8,
+				WhiteCount: 2,
+				BlackCount: 2,
+				LastColor:  "WHITE",
+			},
+			{
+				PlayerId:   "lower-ranked",
+				Score:      7,
+				WhiteCount: 2,
+				BlackCount: 2,
+				LastColor:  "BLACK",
+			},
+		},
+	}
+
+	result, err := CalculatePairings(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CalculatePairings() error = %v", err)
+	}
+
+	match := result.Matches[0]
+	if match.GetWhitePlayerId() != "lower-ranked" {
+		t.Errorf("white player = %q, want %q", match.GetWhitePlayerId(), "lower-ranked")
+	}
+}
+
+func TestCalculatePairingsBacktracksToAvoidAllRematches(t *testing.T) {
+	request := &pairingv1.PairingRequest{
+		TournamentId: "tournament-backtracking",
+		Round:        6,
+		Players: []*pairingv1.Player{
+			{PlayerId: "p1", Score: 4, AvoidedOpponents: []string{"p4"}},
+			{PlayerId: "p2", Score: 3},
+			{PlayerId: "p3", Score: 2, AvoidedOpponents: []string{"p4"}},
+			{PlayerId: "p4", Score: 1},
+		},
+	}
+
+	result, err := CalculatePairings(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CalculatePairings() error = %v", err)
+	}
+
+	want := [][2]string{{"p1", "p3"}, {"p2", "p4"}}
+	for i, match := range result.Matches {
+		if got := [2]string{match.GetWhitePlayerId(), match.GetBlackPlayerId()}; got != want[i] {
+			t.Errorf("match %d players = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
+func TestCalculatePairingsRejectsUnavoidableRematch(t *testing.T) {
+	request := &pairingv1.PairingRequest{
+		TournamentId: "tournament-no-valid-pairing",
+		Round:        2,
+		Players: []*pairingv1.Player{
+			{PlayerId: "p1", Score: 2, AvoidedOpponents: []string{"p2"}},
+			{PlayerId: "p2", Score: 1},
+		},
+	}
+
+	if _, err := CalculatePairings(context.Background(), request); err == nil {
+		t.Fatal("CalculatePairings() error = nil, want unavoidable-rematch error")
+	}
+}
+
+func TestServiceReturnsByePlayerID(t *testing.T) {
+	pool, err := NewWorkerPool(1)
+	if err != nil {
+		t.Fatalf("NewWorkerPool() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	response, err := NewService(pool).GeneratePairings(
+		context.Background(),
+		&pairingv1.PairingRequest{
+			TournamentId: "tournament-service-bye",
+			Round:        1,
+			Players: []*pairingv1.Player{
+				{PlayerId: "p1", Score: 3},
+				{PlayerId: "p2", Score: 2},
+				{PlayerId: "p3", Score: 1},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("GeneratePairings() error = %v", err)
+	}
+	if !response.GetSuccess() {
+		t.Fatalf("response success = false, error = %q", response.GetErrorMessage())
+	}
+	if response.GetByePlayerId() != "p3" {
+		t.Errorf("bye player = %q, want %q", response.GetByePlayerId(), "p3")
+	}
+}
+
 func TestWorkerPoolProcessesRequestsConcurrently(t *testing.T) {
 	const (
 		workerCount  = 4
-		requestCount = 24
+		requestCount = 64
 	)
 
 	var activeWorkers atomic.Int32
@@ -89,7 +255,7 @@ func TestWorkerPoolProcessesRequestsConcurrently(t *testing.T) {
 	calculator := func(
 		ctx context.Context,
 		request *pairingv1.PairingRequest,
-	) ([]*pairingv1.Match, error) {
+	) (*PairingResult, error) {
 		active := activeWorkers.Add(1)
 		defer activeWorkers.Add(-1)
 		updateMaximum(&maximumActiveWorkers, active)
@@ -119,12 +285,12 @@ func TestWorkerPoolProcessesRequestsConcurrently(t *testing.T) {
 			defer callers.Done()
 			<-start
 
-			matches, err := pool.GeneratePairings(
+			result, err := pool.GeneratePairings(
 				context.Background(),
 				newFourPlayerRequest(requestNumber),
 			)
-			if err == nil && len(matches) != 2 {
-				err = fmt.Errorf("match count = %d, want 2", len(matches))
+			if err == nil && len(result.Matches) != 2 {
+				err = fmt.Errorf("match count = %d, want 2", len(result.Matches))
 			}
 			errorsByRequest <- err
 		}(i)

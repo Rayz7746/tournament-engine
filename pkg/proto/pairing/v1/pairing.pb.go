@@ -26,6 +26,10 @@ type Player struct {
 	PlayerId         string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
 	Score            int32                  `protobuf:"varint,2,opt,name=score,proto3" json:"score,omitempty"`
 	AvoidedOpponents []string               `protobuf:"bytes,3,rep,name=avoided_opponents,json=avoidedOpponents,proto3" json:"avoided_opponents,omitempty"`
+	WhiteCount       int32                  `protobuf:"varint,4,opt,name=white_count,json=whiteCount,proto3" json:"white_count,omitempty"`
+	BlackCount       int32                  `protobuf:"varint,5,opt,name=black_count,json=blackCount,proto3" json:"black_count,omitempty"`
+	LastColor        string                 `protobuf:"bytes,6,opt,name=last_color,json=lastColor,proto3" json:"last_color,omitempty"`
+	ReceivedBye      bool                   `protobuf:"varint,7,opt,name=received_bye,json=receivedBye,proto3" json:"received_bye,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -79,6 +83,34 @@ func (x *Player) GetAvoidedOpponents() []string {
 		return x.AvoidedOpponents
 	}
 	return nil
+}
+
+func (x *Player) GetWhiteCount() int32 {
+	if x != nil {
+		return x.WhiteCount
+	}
+	return 0
+}
+
+func (x *Player) GetBlackCount() int32 {
+	if x != nil {
+		return x.BlackCount
+	}
+	return 0
+}
+
+func (x *Player) GetLastColor() string {
+	if x != nil {
+		return x.LastColor
+	}
+	return ""
+}
+
+func (x *Player) GetReceivedBye() bool {
+	if x != nil {
+		return x.ReceivedBye
+	}
+	return false
 }
 
 type Match struct {
@@ -214,6 +246,7 @@ type PairingResponse struct {
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Matches       []*Match               `protobuf:"bytes,2,rep,name=matches,proto3" json:"matches,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	ByePlayerId   string                 `protobuf:"bytes,4,opt,name=bye_player_id,json=byePlayerId,proto3" json:"bye_player_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -269,16 +302,30 @@ func (x *PairingResponse) GetErrorMessage() string {
 	return ""
 }
 
+func (x *PairingResponse) GetByePlayerId() string {
+	if x != nil {
+		return x.ByePlayerId
+	}
+	return ""
+}
+
 var File_proto_pairing_v1_pairing_proto protoreflect.FileDescriptor
 
 const file_proto_pairing_v1_pairing_proto_rawDesc = "" +
 	"\n" +
 	"\x1eproto/pairing/v1/pairing.proto\x12\n" +
-	"pairing.v1\"h\n" +
+	"pairing.v1\"\xec\x01\n" +
 	"\x06Player\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x05R\x05score\x12+\n" +
-	"\x11avoided_opponents\x18\x03 \x03(\tR\x10avoidedOpponents\"\x95\x01\n" +
+	"\x11avoided_opponents\x18\x03 \x03(\tR\x10avoidedOpponents\x12\x1f\n" +
+	"\vwhite_count\x18\x04 \x01(\x05R\n" +
+	"whiteCount\x12\x1f\n" +
+	"\vblack_count\x18\x05 \x01(\x05R\n" +
+	"blackCount\x12\x1d\n" +
+	"\n" +
+	"last_color\x18\x06 \x01(\tR\tlastColor\x12!\n" +
+	"\freceived_bye\x18\a \x01(\bR\vreceivedBye\"\x95\x01\n" +
 	"\x05Match\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12&\n" +
 	"\x0fwhite_player_id\x18\x02 \x01(\tR\rwhitePlayerId\x12&\n" +
@@ -287,11 +334,12 @@ const file_proto_pairing_v1_pairing_proto_rawDesc = "" +
 	"\x0ePairingRequest\x12#\n" +
 	"\rtournament_id\x18\x01 \x01(\tR\ftournamentId\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\x05R\x05round\x12,\n" +
-	"\aplayers\x18\x03 \x03(\v2\x12.pairing.v1.PlayerR\aplayers\"}\n" +
+	"\aplayers\x18\x03 \x03(\v2\x12.pairing.v1.PlayerR\aplayers\"\xa1\x01\n" +
 	"\x0fPairingResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12+\n" +
 	"\amatches\x18\x02 \x03(\v2\x11.pairing.v1.MatchR\amatches\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2]\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\x12\"\n" +
+	"\rbye_player_id\x18\x04 \x01(\tR\vbyePlayerId2]\n" +
 	"\x0ePairingService\x12K\n" +
 	"\x10GeneratePairings\x12\x1a.pairing.v1.PairingRequest\x1a\x1b.pairing.v1.PairingResponseB2Z0tournament-engine/pkg/proto/pairing/v1;pairingv1b\x06proto3"
 

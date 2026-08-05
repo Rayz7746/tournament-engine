@@ -82,11 +82,13 @@
 #### Completed Tasks
 
 - Added the versioned `pairing.v1` protobuf contract and generated Go message and gRPC bindings under `pkg/proto/pairing/v1/`.
+- Extended player state with White/Black game counts, last-color history, and prior-bye tracking; pairing responses now identify the player awarded a one-point bye.
 - Added `scripts/gen_proto.sh` for reproducible Linux Bash generation, including Arch Linux and Go plugin installation guidance when tools are unavailable.
 - Added a bounded, context-aware Goroutine worker pool for off-transport pairing calculations, configured with six workers in the pairing service entrypoint.
-- Added deterministic baseline Swiss pairing that sorts by score, pairs the closest eligible players, rejects duplicate player IDs, and avoids opponents listed by either player.
+- Upgraded the Swiss engine with deterministic score ranking, lowest-ranked eligible bye assignment for odd fields, color balancing based on White/Black history and last-color alternation, and higher-rank color tie-breaking.
+- Replaced greedy opponent selection with deterministic backtracking, strictly preventing rematches while finding a complete legal round whenever the supplied opponent constraints allow one.
 - Implemented and registered the `PairingService.GeneratePairings` gRPC endpoint on the existing port `50053` service.
-- Added tests for eight-player score ordering, previous-opponent avoidance, and concurrent processing across a fixed four-worker test pool.
+- Added tests for eight-player score ordering, bye selection and response propagation, color balance and alternation, rematch backtracking, impossible-rematch rejection, and 64 concurrent requests across a fixed four-worker test pool.
 
 #### Verification
 

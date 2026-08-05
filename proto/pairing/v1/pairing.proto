@@ -8,6 +8,10 @@ message Player {
   string player_id = 1;
   int32 score = 2;
   repeated string avoided_opponents = 3;
+  int32 white_count = 4;
+  int32 black_count = 5;
+  string last_color = 6;
+  bool received_bye = 7;
 }
 
 message Match {
@@ -27,6 +31,7 @@ message PairingResponse {
   bool success = 1;
   repeated Match matches = 2;
   string error_message = 3;
+  string bye_player_id = 4;
 }
 
 service PairingService {
