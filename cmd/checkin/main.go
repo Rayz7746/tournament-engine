@@ -21,6 +21,7 @@ const (
 	defaultAddress       = ":50052"
 	defaultRedisAddress  = "localhost:6379"
 	defaultRedisPassword = "redis123"
+	defaultPostgresDSN   = "host=localhost user=root password=secret dbname=chess_db port=5432 sslmode=disable TimeZone=UTC"
 )
 
 func main() {
@@ -53,12 +54,37 @@ func run() error {
 		}
 	}()
 
+	postgresDB, err := database.OpenGORM(
+		ctx,
+		environmentOrDefault("POSTGRES_DSN", defaultPostgresDSN),
+	)
+	if err != nil {
+		return fmt.Errorf("open Postgres for check-in service: %w", err)
+	}
+	sqlDB, err := postgresDB.DB()
+	if err != nil {
+		return fmt.Errorf("get check-in SQL connection: %w", err)
+	}
+	defer func() {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			log.Printf("close checkin Postgres connection: %v", closeErr)
+		}
+	}()
+
+	repository, err := checkin.NewRepository(postgresDB)
+	if err != nil {
+		return fmt.Errorf("create check-in repository: %w", err)
+	}
+	if err := repository.Migrate(ctx); err != nil {
+		return fmt.Errorf("initialize check-in persistence: %w", err)
+	}
+
 	consumerConfig := checkin.DefaultConsumerConfig()
 	consumerConfig.ConsumerName = environmentOrDefault("CHECKIN_CONSUMER_NAME", checkin.DefaultConsumerName)
 	consumer, err := checkin.NewConsumer(
 		redisClient,
 		consumerConfig,
-		processCheckinEvent,
+		repository,
 	)
 	if err != nil {
 		return fmt.Errorf("create check-in stream consumer: %w", err)
@@ -117,16 +143,6 @@ func run() error {
 		return fmt.Errorf("stop check-in event consumer: %w", err)
 	}
 	log.Print("checkin stopped")
-	return nil
-}
-
-func processCheckinEvent(_ context.Context, event checkin.CheckinEvent) error {
-	log.Printf(
-		"processed check-in event id=%s tournament_id=%s player_id=%s",
-		event.ID,
-		event.TournamentID,
-		event.PlayerID,
-	)
 	return nil
 }
 

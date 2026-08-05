@@ -19,10 +19,6 @@ const (
 	defaultInitialBackoff      = 100 * time.Millisecond
 )
 
-// MessageProcessor performs the application-specific work for one check-in
-// event. Returning an error activates the durable retry and DLQ policy.
-type MessageProcessor func(context.Context, CheckinEvent) error
-
 type ConsumerConfig struct {
 	Stream         string
 	Group          string
@@ -53,30 +49,30 @@ func DefaultConsumerConfig() ConsumerConfig {
 
 // Consumer reads a Redis Consumer Group into a bounded Goroutine worker pool.
 type Consumer struct {
-	client    redis.Cmdable
-	config    ConsumerConfig
-	processor MessageProcessor
+	client     redis.Cmdable
+	config     ConsumerConfig
+	repository CheckinRepository
 }
 
 func NewConsumer(
 	client redis.Cmdable,
 	config ConsumerConfig,
-	processor MessageProcessor,
+	repository CheckinRepository,
 ) (*Consumer, error) {
 	if client == nil {
 		return nil, errors.New("Redis client is required")
 	}
-	if processor == nil {
-		return nil, errors.New("message processor is required")
+	if repository == nil {
+		return nil, errors.New("check-in repository is required")
 	}
 	if err := validateConsumerConfig(config); err != nil {
 		return nil, err
 	}
 
 	return &Consumer{
-		client:    client,
-		config:    config,
-		processor: processor,
+		client:     client,
+		config:     config,
+		repository: repository,
 	}, nil
 }
 
@@ -259,7 +255,19 @@ func (c *Consumer) processWithRetry(ctx context.Context, message redis.XMessage)
 	for {
 		event, processingErr := decodeCheckinEvent(message)
 		if processingErr == nil {
-			processingErr = c.processor(ctx, event)
+			var checkedInAt time.Time
+			checkedInAt, processingErr = time.Parse(time.RFC3339Nano, event.Timestamp)
+			if processingErr != nil {
+				processingErr = fmt.Errorf("parse check-in timestamp %q: %w", event.Timestamp, processingErr)
+			}
+			if processingErr == nil {
+				processingErr = c.repository.SaveCheckin(
+					ctx,
+					event.TournamentID,
+					event.PlayerID,
+					checkedInAt,
+				)
+			}
 		}
 		if processingErr == nil {
 			return c.acknowledge(ctx, message.ID)

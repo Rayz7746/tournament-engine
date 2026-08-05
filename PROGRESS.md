@@ -108,6 +108,10 @@
 - Added transactional DLQ routing to `stream:checkin_dlq`, followed by acknowledgment of the original message and retry-state cleanup after the fourth failed processing attempt.
 - Wired the stream consumer into the check-in service lifecycle with authenticated Redis connectivity and graceful consumer shutdown.
 - Added isolated Redis integration tests for event publication, successful processing and acknowledgment, retry exhaustion, DLQ payloads, empty pending-entry state, and retry-state cleanup.
+- Added the GORM-backed `checkin_records` PostgreSQL model with non-null fields, individual tournament/player indexes, and a composite unique constraint on `(tournament_id, player_id)`.
+- Added startup migration and idempotent `ON CONFLICT DO NOTHING` persistence so at-least-once Redis delivery cannot create duplicate database rows.
+- Moved PostgreSQL persistence inside the consumer processing attempt: successful commits are acknowledged, while database errors remain pending and follow the existing retry/DLQ policy.
+- Added PostgreSQL-backed integration coverage that observes the inserted row before acknowledgment and verifies duplicate saves retain exactly one record.
 
 #### Verification
 
@@ -115,3 +119,4 @@
 - `go build ./...` — passed.
 - `go vet ./...` — passed.
 - `git diff --check` — passed.
+- Direct `chess_db` schema inspection confirmed the primary key, both single-column indexes, and the composite unique index.

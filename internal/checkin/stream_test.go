@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"tournament-engine/pkg/database"
+
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
+
+const defaultTestPostgresDSN = "host=localhost user=root password=secret dbname=chess_db port=5432 sslmode=disable TimeZone=UTC"
 
 func TestSuccessfulCheckInPublishesEvent(t *testing.T) {
 	manager, client := newTestManager(t)
@@ -54,20 +60,22 @@ func TestSuccessfulCheckInPublishesEvent(t *testing.T) {
 	}
 }
 
-func TestConsumerProcessesAndAcknowledgesMessage(t *testing.T) {
+func TestConsumerPersistsAndAcknowledgesMessage(t *testing.T) {
 	client := newTestRedisClient(t)
 	config := testConsumerConfig(t)
 	cleanupConsumerKeys(t, client, config)
 
-	messageID := addTestCheckinEvent(t, client, config.Stream, "tournament-success", "player-success")
-	processed := make(chan CheckinEvent, 1)
+	repository, postgresDB := newTestRepository(t)
+	tournamentID := fmt.Sprintf("tournament-persistence-%d", testIDCounter.Add(1))
+	playerID := "player-persistence"
+	checkedInAt := time.Now().UTC().Truncate(time.Microsecond)
+	cleanupCheckinRecord(t, postgresDB, tournamentID, playerID)
+
+	addTestCheckinEvent(t, client, config.Stream, tournamentID, playerID, checkedInAt)
 	consumer, err := NewConsumer(
 		client,
 		config,
-		func(_ context.Context, event CheckinEvent) error {
-			processed <- event
-			return nil
-		},
+		repository,
 	)
 	if err != nil {
 		t.Fatalf("NewConsumer() error = %v", err)
@@ -76,17 +84,30 @@ func TestConsumerProcessesAndAcknowledgesMessage(t *testing.T) {
 	cancel, consumerDone := startTestConsumer(t, consumer)
 	defer cancel()
 
-	select {
-	case event := <-processed:
-		if event.ID != messageID {
-			t.Errorf("processed message ID = %q, want %q", event.ID, messageID)
-		}
-		if event.TournamentID != "tournament-success" || event.PlayerID != "player-success" {
-			t.Errorf("processed event = %+v, want expected tournament and player", event)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for check-in event processing")
+	eventually(t, 3*time.Second, func() (bool, error) {
+		var count int64
+		err := postgresDB.WithContext(context.Background()).
+			Model(&CheckinRecord{}).
+			Where("tournament_id = ? AND player_id = ?", tournamentID, playerID).
+			Count(&count).Error
+		return err == nil && count == 1, err
+	})
+
+	var record CheckinRecord
+	if err := postgresDB.WithContext(context.Background()).
+		Where("tournament_id = ? AND player_id = ?", tournamentID, playerID).
+		First(&record).Error; err != nil {
+		t.Fatalf("read persisted check-in record: %v", err)
 	}
+	if !record.CheckedInAt.Equal(checkedInAt) {
+		t.Errorf("persisted checked_in_at = %s, want %s", record.CheckedInAt, checkedInAt)
+	}
+	t.Logf(
+		"persisted check-in row id=%d tournament_id=%s player_id=%s",
+		record.ID,
+		record.TournamentID,
+		record.PlayerID,
+	)
 
 	eventually(t, 2*time.Second, func() (bool, error) {
 		pending, err := client.XPending(context.Background(), config.Stream, config.Group).Result()
@@ -97,6 +118,44 @@ func TestConsumerProcessesAndAcknowledgesMessage(t *testing.T) {
 	assertConsumerStopped(t, consumerDone)
 }
 
+func TestRepositorySaveCheckinIsIdempotent(t *testing.T) {
+	repository, postgresDB := newTestRepository(t)
+	tournamentID := fmt.Sprintf("tournament-idempotency-%d", testIDCounter.Add(1))
+	playerID := "player-idempotency"
+	firstCheckin := time.Now().UTC().Truncate(time.Microsecond)
+	cleanupCheckinRecord(t, postgresDB, tournamentID, playerID)
+
+	if err := repository.SaveCheckin(
+		context.Background(),
+		tournamentID,
+		playerID,
+		firstCheckin,
+	); err != nil {
+		t.Fatalf("first SaveCheckin() error = %v", err)
+	}
+	if err := repository.SaveCheckin(
+		context.Background(),
+		tournamentID,
+		playerID,
+		firstCheckin.Add(time.Minute),
+	); err != nil {
+		t.Fatalf("duplicate SaveCheckin() error = %v", err)
+	}
+
+	var records []CheckinRecord
+	if err := postgresDB.WithContext(context.Background()).
+		Where("tournament_id = ? AND player_id = ?", tournamentID, playerID).
+		Find(&records).Error; err != nil {
+		t.Fatalf("read idempotent check-in records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("persisted duplicate record count = %d, want 1", len(records))
+	}
+	if !records[0].CheckedInAt.Equal(firstCheckin) {
+		t.Errorf("duplicate save changed checked_in_at to %s, want %s", records[0].CheckedInAt, firstCheckin)
+	}
+}
+
 func TestConsumerRetriesThenRoutesToDLQ(t *testing.T) {
 	client := newTestRedisClient(t)
 	config := testConsumerConfig(t)
@@ -104,15 +163,22 @@ func TestConsumerRetriesThenRoutesToDLQ(t *testing.T) {
 	config.InitialBackoff = 5 * time.Millisecond
 	cleanupConsumerKeys(t, client, config)
 
-	messageID := addTestCheckinEvent(t, client, config.Stream, "tournament-failure", "player-failure")
+	messageID := addTestCheckinEvent(
+		t,
+		client,
+		config.Stream,
+		"tournament-failure",
+		"player-failure",
+		time.Now().UTC(),
+	)
 	var processingAttempts atomic.Int32
 	consumer, err := NewConsumer(
 		client,
 		config,
-		func(context.Context, CheckinEvent) error {
+		checkinRepositoryFunc(func(context.Context, string, string, time.Time) error {
 			processingAttempts.Add(1)
 			return errors.New("simulated processing failure")
-		},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("NewConsumer() error = %v", err)
@@ -201,6 +267,7 @@ func addTestCheckinEvent(
 	t *testing.T,
 	client *redis.Client,
 	stream, tournamentID, playerID string,
+	checkedInAt time.Time,
 ) string {
 	t.Helper()
 
@@ -209,13 +276,74 @@ func addTestCheckinEvent(
 		Values: map[string]interface{}{
 			"tournament_id": tournamentID,
 			"player_id":     playerID,
-			"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
+			"timestamp":     checkedInAt.UTC().Format(time.RFC3339Nano),
 		},
 	}).Result()
 	if err != nil {
 		t.Fatalf("add test check-in event: %v", err)
 	}
 	return messageID
+}
+
+type checkinRepositoryFunc func(context.Context, string, string, time.Time) error
+
+func (function checkinRepositoryFunc) SaveCheckin(
+	ctx context.Context,
+	tournamentID, playerID string,
+	checkedInAt time.Time,
+) error {
+	return function(ctx, tournamentID, playerID, checkedInAt)
+}
+
+func newTestRepository(t *testing.T) (*Repository, *gorm.DB) {
+	t.Helper()
+
+	dsn := os.Getenv("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = defaultTestPostgresDSN
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	postgresDB, err := database.OpenGORM(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to test Postgres: %v", err)
+	}
+	sqlDB, err := postgresDB.DB()
+	if err != nil {
+		t.Fatalf("get test SQL connection: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close test Postgres connection: %v", err)
+		}
+	})
+
+	repository, err := NewRepository(postgresDB)
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	if err := repository.Migrate(ctx); err != nil {
+		t.Fatalf("migrate test check-in records: %v", err)
+	}
+	return repository, postgresDB
+}
+
+func cleanupCheckinRecord(
+	t *testing.T,
+	postgresDB *gorm.DB,
+	tournamentID, playerID string,
+) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := postgresDB.WithContext(ctx).
+			Where("tournament_id = ? AND player_id = ?", tournamentID, playerID).
+			Delete(&CheckinRecord{}).Error; err != nil {
+			t.Errorf("delete test check-in record: %v", err)
+		}
+	})
 }
 
 func startTestConsumer(t *testing.T, consumer *Consumer) (context.CancelFunc, <-chan error) {
