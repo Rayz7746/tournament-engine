@@ -59,9 +59,12 @@ func (m *CheckinManager) TryCheckIn(
 	result, err := m.script.Run(
 		ctx,
 		m.client,
-		[]string{checkinKey(tournamentID, playerID)},
+		[]string{checkinKey(tournamentID, playerID), CheckinEventStream},
 		"1",
 		ttlMilliseconds,
+		tournamentID,
+		playerID,
+		time.Now().UTC().Format(time.RFC3339Nano),
 	).Int64()
 	if err != nil {
 		return false, fmt.Errorf("run atomic check-in script: %w", err)

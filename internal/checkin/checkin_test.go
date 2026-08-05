@@ -2,6 +2,7 @@ package checkin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -24,7 +25,7 @@ func TestTryCheckInSingleSuccess(t *testing.T) {
 	manager, client := newTestManager(t)
 	tournamentID, playerID := uniqueCheckinIDs(t)
 	key := checkinKey(tournamentID, playerID)
-	t.Cleanup(func() { deleteTestKey(t, client, key) })
+	t.Cleanup(func() { deleteTestCheckinData(t, client, key, tournamentID, playerID) })
 
 	succeeded, err := manager.TryCheckIn(
 		context.Background(),
@@ -60,7 +61,7 @@ func TestTryCheckInRejectsDuplicate(t *testing.T) {
 	manager, client := newTestManager(t)
 	tournamentID, playerID := uniqueCheckinIDs(t)
 	key := checkinKey(tournamentID, playerID)
-	t.Cleanup(func() { deleteTestKey(t, client, key) })
+	t.Cleanup(func() { deleteTestCheckinData(t, client, key, tournamentID, playerID) })
 
 	first, err := manager.TryCheckIn(
 		context.Background(),
@@ -95,7 +96,7 @@ func TestTryCheckInConcurrentExactlyOneSuccess(t *testing.T) {
 	manager, client := newTestManager(t)
 	tournamentID, playerID := uniqueCheckinIDs(t)
 	key := checkinKey(tournamentID, playerID)
-	t.Cleanup(func() { deleteTestKey(t, client, key) })
+	t.Cleanup(func() { deleteTestCheckinData(t, client, key, tournamentID, playerID) })
 
 	type result struct {
 		succeeded bool
@@ -144,6 +145,12 @@ func TestTryCheckInConcurrentExactlyOneSuccess(t *testing.T) {
 
 func newTestManager(t *testing.T) (*CheckinManager, *redis.Client) {
 	t.Helper()
+	client := newTestRedisClient(t)
+	return NewCheckinManager(client), client
+}
+
+func newTestRedisClient(t *testing.T) *redis.Client {
+	t.Helper()
 
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {
@@ -171,7 +178,7 @@ func newTestManager(t *testing.T) (*CheckinManager, *redis.Client) {
 		t.Fatalf("connect to Redis at %s: %v", address, err)
 	}
 
-	return NewCheckinManager(client), client
+	return client
 }
 
 func uniqueCheckinIDs(t *testing.T) (string, string) {
@@ -181,12 +188,35 @@ func uniqueCheckinIDs(t *testing.T) (string, string) {
 	return fmt.Sprintf("test-%d-%d", time.Now().UnixNano(), id), "player"
 }
 
-func deleteTestKey(t *testing.T, client *redis.Client, key string) {
+func deleteTestCheckinData(
+	t *testing.T,
+	client *redis.Client,
+	key, tournamentID, playerID string,
+) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Del(ctx, key).Err(); err != nil {
 		t.Errorf("delete test key %q: %v", key, err)
+	}
+
+	messages, err := client.XRange(ctx, CheckinEventStream, "-", "+").Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		t.Errorf("read test check-in events: %v", err)
+		return
+	}
+
+	messageIDs := make([]string, 0, 1)
+	for _, message := range messages {
+		if streamValue(message.Values, "tournament_id") == tournamentID &&
+			streamValue(message.Values, "player_id") == playerID {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	if len(messageIDs) > 0 {
+		if err := client.XDel(ctx, CheckinEventStream, messageIDs...).Err(); err != nil {
+			t.Errorf("delete test check-in events: %v", err)
+		}
 	}
 }

@@ -17,7 +17,7 @@
   - Generate Go gRPC code via `protoc`
   - Implement Goroutine Worker Pool for Swiss-pairing calculations
 
-- [ ] **Stage 4: Core Module C - Redis Streams & Dead Letter Queue (DLQ)**
+- [x] **Stage 4: Core Module C - Redis Streams & Dead Letter Queue (DLQ)**
   - Implement Stream event producer for check-ins
   - Implement Consumer Group worker pool with Exponential Backoff retries
   - Build DLQ routing for failed messages
@@ -96,3 +96,22 @@
 - `go test -v -race ./internal/pairing/...` — passed with no reported data races.
 - `go build ./...` — passed.
 - `go vet ./...` — passed.
+
+### Stage 4: Core Module C - Redis Streams & Dead Letter Queue — Completed
+
+#### Completed Tasks
+
+- Extended the atomic check-in Lua script so lock acquisition, TTL assignment, and publication to `stream:checkin_events` occur in one Redis execution with `tournament_id`, `player_id`, and an RFC3339Nano `timestamp`.
+- Added configurable Redis Consumer Group processing with production defaults `checkin_processors` and `worker-1`, `XGROUP CREATE ... MKSTREAM`, pending-message recovery, and blocking reads for new messages.
+- Added a bounded four-Goroutine consumer worker pool with context-aware startup, processing, cancellation, and shutdown behavior.
+- Added durable per-message retry tracking in Redis with three retries and exponential delays of 100 ms, 200 ms, and 400 ms.
+- Added transactional DLQ routing to `stream:checkin_dlq`, followed by acknowledgment of the original message and retry-state cleanup after the fourth failed processing attempt.
+- Wired the stream consumer into the check-in service lifecycle with authenticated Redis connectivity and graceful consumer shutdown.
+- Added isolated Redis integration tests for event publication, successful processing and acknowledgment, retry exhaustion, DLQ payloads, empty pending-entry state, and retry-state cleanup.
+
+#### Verification
+
+- `go test -v -race ./internal/checkin/...` — passed with no reported data races.
+- `go build ./...` — passed.
+- `go vet ./...` — passed.
+- `git diff --check` — passed.
