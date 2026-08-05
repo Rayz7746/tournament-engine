@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,10 +11,16 @@ import (
 	"syscall"
 	"time"
 
+	pairingservice "tournament-engine/internal/pairing"
+	pairingv1 "tournament-engine/pkg/proto/pairing/v1"
+
 	"google.golang.org/grpc"
 )
 
-const defaultAddress = ":50053"
+const (
+	defaultAddress     = ":50053"
+	pairingWorkerCount = 6
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -39,10 +46,23 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
-	defer listener.Close()
+	defer func() {
+		if closeErr := listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+			log.Printf("close pairing listener: %v", closeErr)
+		}
+	}()
+
+	workerPool, err := pairingservice.NewWorkerPool(pairingWorkerCount)
+	if err != nil {
+		return fmt.Errorf("create pairing worker pool: %w", err)
+	}
+	defer workerPool.Close()
 
 	server := grpc.NewServer()
-	// TODO: Register pairing gRPC services and pairing workers here.
+	pairingv1.RegisterPairingServiceServer(
+		server,
+		pairingservice.NewService(workerPool),
+	)
 
 	serveErr := make(chan error, 1)
 	go func() {

@@ -12,7 +12,7 @@
   - Wrap Go client for Redis `EVAL` command
   - Write unit tests for lock concurrency
 
-- [ ] **Stage 3: Core Module B - Protobuf & gRPC Pairing Engine**
+- [x] **Stage 3: Core Module B - Protobuf & gRPC Pairing Engine**
   - Define `pairing.proto` protobuf contracts
   - Generate Go gRPC code via `protoc`
   - Implement Goroutine Worker Pool for Swiss-pairing calculations
@@ -76,3 +76,21 @@
 #### Verification
 
 - `go test -v -race ./internal/checkin/...` — passed with no reported data races.
+
+### Stage 3: Core Module B - Protobuf & gRPC Pairing Engine — Completed
+
+#### Completed Tasks
+
+- Added the versioned `pairing.v1` protobuf contract and generated Go message and gRPC bindings under `pkg/proto/pairing/v1/`.
+- Added `scripts/gen_proto.sh` for reproducible Linux Bash generation, including Arch Linux and Go plugin installation guidance when tools are unavailable.
+- Added a bounded, context-aware Goroutine worker pool for off-transport pairing calculations, configured with six workers in the pairing service entrypoint.
+- Added deterministic baseline Swiss pairing that sorts by score, pairs the closest eligible players, rejects duplicate player IDs, and avoids opponents listed by either player.
+- Implemented and registered the `PairingService.GeneratePairings` gRPC endpoint on the existing port `50053` service.
+- Added tests for eight-player score ordering, previous-opponent avoidance, and concurrent processing across a fixed four-worker test pool.
+
+#### Verification
+
+- `./scripts/gen_proto.sh` — passed using `protoc 35.1`, `protoc-gen-go 1.36.11`, and `protoc-gen-go-grpc 1.6.2`.
+- `go test -v -race ./internal/pairing/...` — passed with no reported data races.
+- `go build ./...` — passed.
+- `go vet ./...` — passed.

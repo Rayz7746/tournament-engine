@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -39,7 +40,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
-	defer listener.Close()
+	defer func() {
+		if closeErr := listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+			log.Printf("close gateway listener: %v", closeErr)
+		}
+	}()
 
 	server := grpc.NewServer()
 	// TODO: Register gateway gRPC services here.
