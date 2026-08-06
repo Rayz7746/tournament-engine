@@ -22,7 +22,7 @@
   - Implement Consumer Group worker pool with Exponential Backoff retries
   - Build DLQ routing for failed messages
 
-- [ ] **Stage 5: Core Module D - API Gateway & Graceful Shutdown**
+- [x] **Stage 5: Core Module D - API Gateway & Graceful Shutdown**
   - Build HTTP Gateway mapping REST to internal gRPC
   - Implement `os/signal` graceful shutdown handlers
 
@@ -120,3 +120,24 @@
 - `go vet ./...` — passed.
 - `git diff --check` — passed.
 - Direct `chess_db` schema inspection confirmed the primary key, both single-column indexes, and the composite unique index.
+
+### Stage 5: Core Module D - API Gateway & Graceful Shutdown — Completed
+
+#### Completed Tasks
+
+- Replaced the gateway's placeholder gRPC listener with a production-configured `net/http` server on port `8080`, with bounded header, request, response, idle, and shutdown timeouts.
+- Added `GET /health`, `POST /api/v1/tournaments/{id}/checkin`, and `POST /api/v1/tournaments/{id}/pairings` REST endpoints with strict JSON decoding and explicit validation, conflict, dependency, and domain-error HTTP statuses.
+- Connected REST check-ins to the Redis-backed atomic `CheckinManager`, including configurable TTLs and duplicate-check-in conflict responses.
+- Added an owned, typed gRPC client connection from the gateway to `pairing.v1.PairingService` and complete JSON/protobuf mapping for current Swiss-player state, matches, and byes.
+- Added signal-driven HTTP shutdown that stops accepting requests, drains active handlers, and closes the pairing gRPC and Redis connections afterward.
+- Hardened the pairing and check-in service exit paths with explicit gRPC server cleanup; pairing workers close after graceful RPC completion.
+- Changed check-in consumer shutdown to stop new stream reads while draining already-dispatched persistence jobs before Redis and PostgreSQL pools close.
+- Added HTTP tests using a real `httptest` server for health, successful and invalid check-ins, duplicate conflicts, and pairing gRPC request/response mapping.
+
+#### Verification
+
+- `go test -v -race ./...` — passed across the full workspace with no reported data races.
+- `go build ./...` — passed.
+- `go vet ./...` — passed.
+- `git diff --check` — passed.
+- Live local smoke test passed for gateway health and gateway-to-pairing gRPC flow; both gateway and pairing processes handled `SIGTERM` and exited cleanly.

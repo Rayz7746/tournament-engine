@@ -106,6 +106,7 @@ func run() error {
 	}()
 
 	server := grpc.NewServer()
+	defer server.Stop()
 	// TODO: Register the check-in gRPC API when its protobuf contract is added.
 
 	consumerErr := make(chan error, 1)
@@ -123,7 +124,7 @@ func run() error {
 	select {
 	case err := <-serveErr:
 		stop()
-		if consumerStopErr := waitForConsumer(consumerErr, 2*time.Second); consumerStopErr != nil {
+		if consumerStopErr := waitForConsumer(consumerErr, 10*time.Second); consumerStopErr != nil {
 			log.Printf("stop check-in event consumer: %v", consumerStopErr)
 		}
 		return fmt.Errorf("serve gRPC: %w", err)
@@ -139,7 +140,7 @@ func run() error {
 	}
 
 	gracefulStop(server, 10*time.Second)
-	if err := waitForConsumer(consumerErr, 2*time.Second); err != nil {
+	if err := waitForConsumer(consumerErr, 10*time.Second); err != nil {
 		return fmt.Errorf("stop check-in event consumer: %w", err)
 	}
 	log.Print("checkin stopped")

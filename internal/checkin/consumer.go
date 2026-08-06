@@ -83,8 +83,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return err
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	readCtx, stopReading := context.WithCancel(ctx)
+	workerCtx, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
+	cancelAll := func() {
+		stopReading()
+		stopWorkers()
+	}
+	defer cancelAll()
 
 	jobs := make(chan redis.XMessage, c.config.WorkerCount*int(c.config.BatchSize))
 	workerErrors := make(chan error, 1)
@@ -94,14 +99,14 @@ func (c *Consumer) Run(ctx context.Context) error {
 	for range c.config.WorkerCount {
 		go func() {
 			defer workers.Done()
-			c.runWorker(runCtx, cancel, jobs, workerErrors)
+			c.runWorker(workerCtx, cancelAll, jobs, workerErrors)
 		}()
 	}
 
-	readErr := c.readMessages(runCtx, jobs)
-	cancel()
+	readErr := c.readMessages(readCtx, jobs)
 	close(jobs)
 	workers.Wait()
+	stopWorkers()
 
 	select {
 	case err := <-workerErrors:

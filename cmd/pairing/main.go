@@ -59,6 +59,7 @@ func run() error {
 	defer workerPool.Close()
 
 	server := grpc.NewServer()
+	defer server.Stop()
 	pairingv1.RegisterPairingServiceServer(
 		server,
 		pairingservice.NewService(workerPool),
