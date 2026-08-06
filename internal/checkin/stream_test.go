@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,8 +13,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
-
-const defaultTestPostgresDSN = "host=localhost user=root password=secret dbname=chess_db port=5432 sslmode=disable TimeZone=UTC"
 
 func TestSuccessfulCheckInPublishesEvent(t *testing.T) {
 	manager, client := newTestManager(t)
@@ -298,14 +295,9 @@ func (function checkinRepositoryFunc) SaveCheckin(
 func newTestRepository(t *testing.T) (*Repository, *gorm.DB) {
 	t.Helper()
 
-	dsn := os.Getenv("POSTGRES_DSN")
-	if dsn == "" {
-		dsn = defaultTestPostgresDSN
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	postgresDB, err := database.OpenGORM(ctx, dsn)
+	postgresDB, err := database.OpenGORM(ctx, testPostgresDSN)
 	if err != nil {
 		t.Fatalf("connect to test Postgres: %v", err)
 	}

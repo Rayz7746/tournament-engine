@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,9 +13,7 @@ import (
 )
 
 const (
-	defaultRedisAddress  = "localhost:6379"
-	defaultRedisPassword = "redis123"
-	testCheckinTTL       = 30 * time.Second
+	testCheckinTTL = 30 * time.Second
 )
 
 var testIDCounter atomic.Uint64
@@ -152,19 +149,9 @@ func newTestManager(t *testing.T) (*CheckinManager, *redis.Client) {
 func newTestRedisClient(t *testing.T) *redis.Client {
 	t.Helper()
 
-	address := os.Getenv("REDIS_ADDR")
-	if address == "" {
-		address = defaultRedisAddress
-	}
-	password := os.Getenv("REDIS_PASSWORD")
-	if password == "" {
-		password = defaultRedisPassword
-	}
-
 	client := redis.NewClient(&redis.Options{
-		Addr:     address,
-		Password: password,
-		DB:       0,
+		Addr: testRedisAddress,
+		DB:   0,
 	})
 	t.Cleanup(func() {
 		if err := client.Close(); err != nil {
@@ -175,7 +162,7 @@ func newTestRedisClient(t *testing.T) *redis.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		t.Fatalf("connect to Redis at %s: %v", address, err)
+		t.Fatalf("connect to Redis at %s: %v", testRedisAddress, err)
 	}
 
 	return client

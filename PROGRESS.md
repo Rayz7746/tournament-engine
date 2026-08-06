@@ -26,7 +26,7 @@
   - Build HTTP Gateway mapping REST to internal gRPC
   - Implement `os/signal` graceful shutdown handlers
 
-- [ ] **Stage 6: Automated Integration Testing**
+- [x] **Stage 6: Automated Integration Testing**
   - Integrate `testcontainers-go` for ephemeral Redis/Postgres testing
   - Execute `go test -race` for concurrency data race checks
 
@@ -141,3 +141,29 @@
 - `go vet ./...` — passed.
 - `git diff --check` — passed.
 - Live local smoke test passed for gateway health and gateway-to-pairing gRPC flow; both gateway and pairing processes handled `SIGTERM` and exited cleanly.
+
+### Stage 6: Automated Integration Testing — Completed
+
+#### Completed Tasks
+
+- Added `pkg/testutil.SetupTestContainers`, backed by the Go 1.22-compatible `testcontainers-go` v0.35.0 PostgreSQL and Redis modules, to start isolated `postgres:16-alpine` and `redis:7-alpine` containers on Docker-assigned ports.
+- Added automatic `checkin_records` schema migration during container setup, connection details for application clients, rollback after partial setup failures, and idempotent PostgreSQL/Redis termination.
+- Removed the check-in test suite's implicit dependency on Compose services at `localhost:5432` and `localhost:6379`; its package-level environment now uses the same ephemeral helper and closes clients before terminating containers.
+- Added a full-pipeline E2E test that runs the Gateway HTTP server and Pairing gRPC server on dynamic loopback ports, starts the real Redis Stream consumer worker pool, and uses real Redis and PostgreSQL clients.
+- Exercised 10 concurrent distinct HTTP check-ins for `t-e2e`, verified all Redis lock keys and TTLs, then issued 12 concurrent duplicate requests against one player and confirmed atomic conflict responses without duplicate stream publication.
+- Waited for asynchronous consumer persistence and asserted exactly 10 distinct `checkin_records` rows for `t-e2e`.
+- Sent the 10 checked-in players through the HTTP pairings endpoint and real gRPC client/service boundary, asserting a successful response containing five numbered matches with every player assigned exactly once.
+- Verified graceful teardown of the HTTP server, gRPC client/server, pairing workers, stream consumer, database clients, and both ephemeral containers.
+
+#### Handover Notes
+
+- Docker must be running and reachable from Linux through `/var/run/docker.sock`; no pre-started project PostgreSQL or Redis containers are required.
+- `go test ./...` now starts ephemeral infrastructure for `internal/checkin` and `tests`; Go runs those packages in separate test processes, so each receives its own isolated PostgreSQL/Redis pair.
+- Testcontainers' Ryuk reaper remains enabled as a fallback, while normal successful paths explicitly call `Terminate` for both application containers.
+
+#### Verification
+
+- `go test -v -race ./...` — passed across the full workspace with no reported data races; all ephemeral PostgreSQL/Redis containers were stopped and terminated.
+- `go build ./...` — passed.
+- `go vet ./...` — passed.
+- `git diff --check` — passed.
